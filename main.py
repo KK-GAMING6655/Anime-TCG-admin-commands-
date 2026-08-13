@@ -45,6 +45,13 @@ def init_db():
     cursor.execute('CREATE TABLE IF NOT EXISTS market (selling_id INTEGER PRIMARY KEY AUTOINCREMENT, seller_id TEXT, card_id TEXT, price INTEGER, quantity INTEGER)')
     cursor.execute('CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)')
 
+    cursor.execute('CREATE TABLE IF NOT EXISTS anime (name TEXT)')
+
+    cursor.execute("PRAGMA table_info(cards)")
+    cards_columns = [column[1] for column in cursor.fetchall()]
+    if "anime" not in cards_columns:
+        cursor.execute("ALTER TABLE cards ADD COLUMN anime TEXT")
+
     # 2. AUTO-REPAIR: Ensure columns exist in the cloud
     cursor.execute("PRAGMA table_info(users)")
     existing_columns = [column[1] for column in cursor.fetchall()]
@@ -522,6 +529,12 @@ async def owned_card_autocomplete(interaction: discord.Interaction, current: str
     return [app_commands.Choice(name=row[0], value=row[0]) for row in rows]
 
 
+async def anime_autocomplete(interaction: discord.Interaction, current: str):
+    local_cursor = conn.cursor()
+    local_cursor.execute("SELECT name FROM anime WHERE name LIKE ? ORDER BY name LIMIT 25", (f"%{current}%",))
+    return [app_commands.Choice(name=row[0], value=row[0]) for row in local_cursor.fetchall()]
+
+
 # --- 6. COMMANDS ---
 
 @client.tree.command(name="add_card", description="Admin: Add card")
@@ -700,13 +713,13 @@ async def remove_rarity(interaction: discord.Interaction, rarity: str):
     
     await interaction.response.send_message(f"✅ Rarity **{rarity} removed. Any affected cards now have 'Unknown' rarity.", ephemeral=True)
 
-@app_commands.autocomplete(card_name=card_name_autocomplete)
+@app_commands.autocomplete(card_name=card_name_autocomplete, anime=anime_autocomplete)
 @client.tree.command(name="edit", description="Admin: Edit an existing card's details")
-async def edit(interaction: discord.Interaction, card_name: str, new_name: str = None, rarity: str = None, value: int = None, image: str = None):
+async def edit(interaction: discord.Interaction, card_name: str, new_name: str = None, rarity: str = None, value: int = None, image: str = None, anime: str = None):
     if not interaction.user.guild_permissions.manage_guild: 
         return await interaction.response.send_message("❌ Admin only!", ephemeral=True)
     
-    cursor.execute('SELECT card_id, name, rarity, value, image FROM cards WHERE name = ? OR card_id = ?', (card_name, card_name))
+    cursor.execute('SELECT card_id, name, rarity, value, image, anime FROM cards WHERE name = ? OR card_id = ?', (card_name, card_name))
     card = cursor.fetchone()
     
     if not card: 
@@ -714,7 +727,6 @@ async def edit(interaction: discord.Interaction, card_name: str, new_name: str =
     
     card_id = card[0]
     
-    # If a new image URL is supplied, convert it to Catbox if needed
     final_image = card[4]
     if image:
         final_image = await asyncio.to_thread(upload_to_catbox_sync, image)
@@ -722,15 +734,30 @@ async def edit(interaction: discord.Interaction, card_name: str, new_name: str =
     final_name = new_name if new_name else card[1]
     final_rarity = rarity if rarity else card[2]
     final_value = value if value is not None else card[3]
+    final_anime = anime if anime else card[5]
     
     try:
-        cursor.execute('UPDATE cards SET name = ?, rarity = ?, value = ?, image = ? WHERE card_id = ?', 
-                       (final_name, final_rarity, final_value, final_image, card_id))
+        cursor.execute('UPDATE cards SET name = ?, rarity = ?, value = ?, image = ?, anime = ? WHERE card_id = ?', 
+                       (final_name, final_rarity, final_value, final_image, final_anime, card_id))
         conn.commit()
-        await interaction.response.send_message(f"✅ Card ** updated successfully!", ephemeral=True)
+        await interaction.response.send_message(f"✅ Card **{final_name}** updated successfully!", ephemeral=True)
     except sqlite3.IntegrityError:
         await interaction.response.send_message("❌ A card with that new name already exists!", ephemeral=True)
 
+
+
+@client.tree.command(name="anime_add", description="Admin: Add a new anime to the list")
+async def anime_add(interaction: discord.Interaction, name: str):
+    if not interaction.user.guild_permissions.manage_guild:
+        return await interaction.response.send_message("❌ Admin only!", ephemeral=True)
+
+    cursor.execute("SELECT 1 FROM anime WHERE name = ?", (name,))
+    if cursor.fetchone():
+        return await interaction.response.send_message(f"❌ **{name}** already exists.", ephemeral=True)
+
+    cursor.execute("INSERT INTO anime (name) VALUES (?)", (name,))
+    conn.commit()
+    await interaction.response.send_message(f"✅ Anime **{name}** added.", ephemeral=True)
 
 # --- PART 9: FINAL FEATURES ---
 
