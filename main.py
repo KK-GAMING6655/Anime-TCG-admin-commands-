@@ -501,6 +501,27 @@ async def on_message(message):
     conn.commit()
 
 
+#card choice
+async def card_name_autocomplete(interaction: discord.Interaction, current: str):
+    local_cursor = conn.cursor()
+    local_cursor.execute("SELECT name FROM cards WHERE name LIKE ? ORDER BY name LIMIT 25", (f"%{current}%",))
+    rows = local_cursor.fetchall()
+    return [app_commands.Choice(name=row[0], value=row[0]) for row in rows]
+
+
+async def owned_card_autocomplete(interaction: discord.Interaction, current: str):
+    user_id = str(interaction.user.id)
+    local_cursor = conn.cursor()
+    local_cursor.execute("""
+        SELECT c.name FROM cards c
+        JOIN inventory i ON c.card_id = i.card_id
+        WHERE i.user_id = ? AND c.name LIKE ?
+        ORDER BY c.name LIMIT 25
+    """, (user_id, f"%{current}%"))
+    rows = local_cursor.fetchall()
+    return [app_commands.Choice(name=row[0], value=row[0]) for row in rows]
+
+
 # --- 6. COMMANDS ---
 
 @client.tree.command(name="add_card", description="Admin: Add card")
@@ -679,7 +700,7 @@ async def remove_rarity(interaction: discord.Interaction, rarity: str):
     
     await interaction.response.send_message(f"✅ Rarity **{rarity} removed. Any affected cards now have 'Unknown' rarity.", ephemeral=True)
 
-
+@app_commands.autocomplete(card_name=card_name_autocomplete)
 @client.tree.command(name="edit", description="Admin: Edit an existing card's details")
 async def edit(interaction: discord.Interaction, card_name: str, new_name: str = None, rarity: str = None, value: int = None, image: str = None):
     if not interaction.user.guild_permissions.manage_guild: 
