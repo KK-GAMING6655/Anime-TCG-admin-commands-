@@ -614,7 +614,7 @@ async def give_crate(interaction: discord.Interaction, name: str, users: str, qu
     crate_id = crate_row[0]
 
     if users.lower() == "all":
-        cursor.execute("SELECT DISTINCT user_id FROM inventory")
+        cursor.execute("SELECT id FROM users")
         recipient_ids = [row[0] for row in cursor.fetchall()]
     else:
         recipient_ids = [users]
