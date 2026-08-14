@@ -598,6 +598,35 @@ async def add_crate(interaction: discord.Interaction, name: str, crate_type: app
     conn.commit()
     await interaction.followup.send(f"✅ Crate **{name}** created (ID: `{new_id}`) — {crate_type.value}: {final_value}")
 
+@client.tree.command(name="give_crate", description="Admin: Give a crate to one or all users")
+@app_commands.autocomplete(name=crate_name_autocomplete, users=crate_recipient_autocomplete)
+async def give_crate(interaction: discord.Interaction, name: str, users: str, quantity: int):
+    await interaction.response.defer(ephemeral=True)
+    if not interaction.user.guild_permissions.manage_guild:
+        return await interaction.followup.send("❌ Admin only!")
+    if quantity <= 0:
+        return await interaction.followup.send("❌ Quantity must be positive.")
+
+    cursor.execute("SELECT crate_id FROM Crate WHERE crate_name = ?", (name,))
+    crate_row = cursor.fetchone()
+    if not crate_row:
+        return await interaction.followup.send(f"❌ Crate **{name}** not found.")
+    crate_id = crate_row[0]
+
+    if users.lower() == "all":
+        cursor.execute("SELECT DISTINCT user_id FROM inventory")
+        recipient_ids = [row[0] for row in cursor.fetchall()]
+    else:
+        recipient_ids = [users]
+
+    for uid in recipient_ids:
+        cursor.execute(
+            "INSERT INTO crate_inventory (user_id, crate_id, quantity) VALUES (?, ?, ?) ON CONFLICT(user_id, crate_id) DO UPDATE SET quantity = quantity + ?",
+            (uid, crate_id, quantity, quantity)
+        )
+    conn.commit()
+    await interaction.followup.send(f"✅ Gave **{quantity}× {name}** to {len(recipient_ids)} user(s).")
+
 
 
 @client.tree.command(name="add_card", description="Admin: Add card")
