@@ -535,7 +535,70 @@ async def anime_autocomplete(interaction: discord.Interaction, current: str):
     return [app_commands.Choice(name=row[0], value=row[0]) for row in local_cursor.fetchall()]
 
 
+
+async def crate_name_autocomplete(interaction: discord.Interaction, current: str):
+    local_cursor = conn.cursor()
+    local_cursor.execute("SELECT crate_name FROM Crate WHERE crate_name LIKE ? ORDER BY crate_name LIMIT 25", (f"%{current}%",))
+    return [app_commands.Choice(name=row[0], value=row[0]) for row in local_cursor.fetchall()]
+
+
+async def crate_value_autocomplete(interaction: discord.Interaction, current: str):
+    crate_type = interaction.namespace.crate_type
+    if crate_type == "Cards":
+        local_cursor = conn.cursor()
+        local_cursor.execute("SELECT name FROM cards WHERE name LIKE ? ORDER BY name LIMIT 25", (f"%{current}%",))
+        return [app_commands.Choice(name=row[0], value=row[0]) for row in local_cursor.fetchall()]
+    return []
+
+
+async def crate_recipient_autocomplete(interaction: discord.Interaction, current: str):
+    local_cursor = conn.cursor()
+    local_cursor.execute("SELECT id, username FROM users")
+    choices = []
+    if current.lower() in "all":
+        choices.append(app_commands.Choice(name="All", value="all"))
+    for uid, username in local_cursor.fetchall():
+        label = username if username else uid
+        if current.lower() in label.lower():
+            choices.append(app_commands.Choice(name=label, value=uid))
+        if len(choices) >= 25:
+            break
+    return choices
+
+
 # --- 6. COMMANDS ---
+@client.tree.command(name="add_crate", description="Admin: Create a new crate")
+@app_commands.choices(crate_type=[
+    app_commands.Choice(name="Coins", value="Coins"),
+    app_commands.Choice(name="Cards", value="Cards"),
+])
+@app_commands.autocomplete(value=crate_value_autocomplete)
+async def add_crate(interaction: discord.Interaction, name: str, crate_type: app_commands.Choice[str], value: str):
+    await interaction.response.defer(ephemeral=True)
+    if not interaction.user.guild_permissions.manage_guild:
+        return await interaction.followup.send("❌ Admin only!")
+
+    if crate_type.value == "Coins":
+        if not value.isdigit():
+            return await interaction.followup.send("❌ Value must be a whole number of coins.")
+        final_value = value
+    else:
+        cursor.execute("SELECT 1 FROM cards WHERE name = ?", (value,))
+        if not cursor.fetchone():
+            return await interaction.followup.send(f"❌ Card **{value}** doesn't exist.")
+        final_value = value
+
+    new_id = random.randint(100000, 999999)
+    cursor.execute("SELECT 1 FROM Crate WHERE crate_id = ?", (new_id,))
+    while cursor.fetchone():
+        new_id = random.randint(100000, 999999)
+        cursor.execute("SELECT 1 FROM Crate WHERE crate_id = ?", (new_id,))
+
+    cursor.execute("INSERT INTO Crate (crate_id, crate_name, crate_type, value) VALUES (?, ?, ?, ?)", (new_id, name, crate_type.value, final_value))
+    conn.commit()
+    await interaction.followup.send(f"✅ Crate **{name}** created (ID: `{new_id}`) — {crate_type.value}: {final_value}")
+
+
 
 @client.tree.command(name="add_card", description="Admin: Add card")
 async def add_card(interaction: discord.Interaction, name: str, rarity: str, value: int, image_url: str):
